@@ -30,8 +30,6 @@ no2.pde = no2.pde %>%
 ```{r}
 # resource: https://www.neonscience.org/dc-convert-date-time-POSIX-r
 dates = as.POSIXlt(no2.pde$date, format = "%Y-%m-%d%H:%M")
-no2.pde$date = as.POSIXlt(no2.pde$date, format = "%Y-%m-%d%H:%M")
-
 no2.pde.2 = data.frame("NO_2" = no2.pde$NO_2)
 no2.pde.2$year = dates$year + 1900
 no2.pde.2$month = dates$mon + 1
@@ -50,8 +48,59 @@ autoplot(pde.ts, scales = "%Y-%m") +
   theme_minimal()
 ```
 
-# seasonality
+# monthly average CO measurements for each station
 
 ```{r}
+co = madrid[!is.na(madrid$CO),] # remove all rows with CO = NA
+co = co %>%
+  select(date, CO, station) # remove all unnecessary columns
+
+# use POSIXlt to extract month
+dates.co = as.POSIXlt(co$date, format = "%Y-%m-%d%H:%M")
+co.mon = data.frame("CO" = co$CO, "station" = co$station)
+co.mon$month = dates.co$mon + 1
+
+# grouped by station then month
+means.co = co.mon %>%
+  group_by(station, month) %>%
+  summarise(mean = mean(CO))
+
+# grouped by month only
+means.co.mon = co.mon %>%
+  group_by(month) %>%
+  summarise(mean = mean(CO))
+
+# month with the highest average CO levels
+month.co.max = means.co.mon[which.max(means.co.mon$mean),]
 ```
 
+# largest average CO levels 
+
+```{r}
+means.co$station = as.factor(means.co$station) # convert station to factor for plotting
+means.co$month = as.factor(means.co$month) # convert month to factor for plotting
+
+ggplot(means.co, aes(month, mean)) +
+  geom_line(aes(group = station, color = station), size = 2) +
+  ggtitle("Group specific line chart")
+```
+
+# monthly CO standard deviations for each station
+
+```{r}
+# grouped by station then month
+sd.co = co.mon %>%
+  group_by(station, month) %>%
+  summarise(sd = sd(CO))
+```
+
+# largest CO standard deviatons 
+
+```{r}
+sd.co$station = as.factor(sd.co$station) # convert station to factor for plotting
+sd.co$month = as.factor(sd.co$month) # convert month to factor for plotting
+
+ggplot(sd.co, aes(month, sd)) +
+  geom_line(aes(group = station, color = station), size = 2) +
+  ggtitle("Group specific line chart")
+```
