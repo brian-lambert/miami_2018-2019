@@ -12,8 +12,9 @@ library(forecast)
 library(knitr)
 library(gridExtra)
 ```
+# 1
 
-# load and clean data 
+### load and clean data 
 
 ```{r}
 madrid = read.csv("C:/Users/Brian Lambert/Desktop/Miami_Fall_2018/STA_483/madrid_2017.csv")
@@ -25,19 +26,9 @@ no2.pde = no2.pde %>%
   select(date, NO_2) # remove all unnecessary columns
 ```
 
-# use POSIXlt to extract year, month, day, hour
+# 2
 
-```{r}
-# resource: https://www.neonscience.org/dc-convert-date-time-POSIX-r
-dates = as.POSIXlt(no2.pde$date, format = "%Y-%m-%d%H:%M")
-no2.pde.2 = data.frame("NO_2" = no2.pde$NO_2)
-no2.pde.2$year = dates$year + 1900
-no2.pde.2$month = dates$mon + 1
-no2.pde.2$day = dates$mday
-no2.pde.2$hour = dates$hour
-```
-
-# plot time series
+### plot time series
 
 ```{r}
 pde.ts = ts(no2.pde$NO_2, start=c(2017,6,1,1), frequency = 8760)
@@ -47,8 +38,9 @@ autoplot(pde.ts, scales = "%Y-%m") +
   ggtitle("NO2 Levels at the Pza. De Espana Recording Station") +
   theme_minimal()
 ```
+# 4
 
-# monthly average CO measurements for each station
+### Monthly mean CO levels by station table
 
 ```{r}
 co = madrid[!is.na(madrid$CO),] # remove all rows with CO = NA
@@ -64,37 +56,50 @@ co.mon$month = dates.co$mon + 1
 means.co = co.mon %>%
   group_by(station, month) %>%
   summarise(mean = mean(CO))
-
-# grouped by month only
-means.co.mon = co.mon %>%
-  group_by(month) %>%
-  summarise(mean = mean(CO))
-
-# month with the highest average CO levels
-month.co.max = means.co.mon[which.max(means.co.mon$mean),]
+head(means.co)
 ```
 
-# largest average CO levels 
+### Which site appears to have the largest levels of carbon monoxide?
 
 ```{r}
 means.co$station = as.factor(means.co$station) # convert station to factor for plotting
 means.co$month = as.factor(means.co$month) # convert month to factor for plotting
 
 ggplot(means.co, aes(month, mean)) +
+  labs(y="mean CO Levels (mg/m^3)") +
   geom_line(aes(group = station, color = station), size = 2) +
-  ggtitle("Group specific line chart")
+  ggtitle("Montly Mean CO Levels by Station")
 ```
 
-# monthly CO standard deviations for each station
+It appears that for the first half of the year the station with the highest monthly mean CO levels is Farolillo (28079018) and for the second half of the year it's Pza. de Espana (28079004).
+
+### Which month appears to have the largest levels of carbon monoxide?
+
+```{r}
+# grouped by month only
+means.co.mon = co.mon %>%
+  group_by(month) %>%
+  summarise(mean = mean(CO))
+
+# month with the highest average CO levels
+means.co.mon[which.max(means.co.mon$mean),]
+```
+
+The month with the largest levels of carbon monoxide levels is January.
+
+# 5
+
+### monthly CO standard deviations by station table
 
 ```{r}
 # grouped by station then month
 sd.co = co.mon %>%
   group_by(station, month) %>%
   summarise(sd = sd(CO))
+head(sd.co)
 ```
 
-# largest CO standard deviatons 
+### Which site appears to be most variable in terms of carbon monoxide?
 
 ```{r}
 sd.co$station = as.factor(sd.co$station) # convert station to factor for plotting
@@ -104,3 +109,36 @@ ggplot(sd.co, aes(month, sd)) +
   geom_line(aes(group = station, color = station), size = 2) +
   ggtitle("Group specific line chart")
 ```
+
+The most variable station in terms of CO is Barrio del Pilar (28079039), while the least variable station in terms of CO is Casa de Campo (28079024).
+
+# 6
+
+### Hourly mean NO2 levels by station table (only top 5 yearly stations)
+
+```{r}
+no2 = madrid[!is.na(madrid$NO_2),] # remove all rows with CO = NA
+no2 = no2 %>%
+  select(date, NO_2, station) # remove all unnecessary columns
+
+# use POSIXlt to extract month
+dates.no2 = as.POSIXlt(no2$date, format = "%Y-%m-%d%H:%M")
+no2.hour = data.frame("NO_2" = no2$NO_2, "station" = no2$station)
+no2.hour$hour = dates.no2$hour
+no2.hour$year = dates.no2$year + 1900
+
+# grouped by station then year
+means.no2.year = no2.hour %>%
+  group_by(station, year) %>%
+  summarise(mean = mean(NO_2)) %>%
+  arrange(desc(mean))
+head(means.no2.year, n=5) # top 5 stations to display in hourly table
+
+# grouped by station then hour
+means.no2 = no2.hour %>%
+  group_by(station, hour) %>%
+  summarise(mean = mean(NO_2)) %>%
+  filter(station %in% c(28079008, 28079056, 28079004, 28079035, 28079017))
+head(means.no2)
+```
+
