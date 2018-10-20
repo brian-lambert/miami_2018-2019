@@ -142,3 +142,45 @@ means.no2 = no2.hour %>%
 head(means.no2)
 ```
 
+# 7
+
+### Time Series plot of the mean NO2 levels for all of madrid
+
+```{r}
+no2.hour$month = dates.no2$mon + 1
+no2.hour$day = dates.no2$wday
+head(no2.hour)
+
+means.no2.all = no2.hour %>% 
+  group_by(year, month, day, hour) %>% 
+  summarise(mean = mean(NO_2))
+head(means.no2.all)
+
+no2.all.ts = ts(means.no2.all$mean, start=c(2017,1,0,0), frequency = 8760)
+autoplot(no2.all.ts, bands = T) +
+  labs(x="Time", y="NO2 Levels (ug/m^3)") +
+  ggtitle("Hourly Mean NO2 Levels for all of Madrid") +
+  theme_minimal()
+```
+
+#8 
+
+### Map of Mean NO2 Levels at Each Station
+
+```{r}
+means.no2.map = no2.hour %>%
+  group_by(station) %>%
+  summarise(mean = mean(NO_2))
+colnames(means.no2.map)[1] = "id" # change variable name to match "stations" data so we can join 
+
+means.no2.map = means.no2.map %>%
+  left_join(stations, by = "id")
+
+if(!requireNamespace("devtools")) install.packages("devtools")
+devtools::install_github("dkahle/ggmap", ref = "tidyup")
+library(ggmap)
+register_google(key = "AIzaSyB5C3GHAmzoiwLbt8tSEyxmrx7OEnw0zwY") 
+spain<- get_googlemap(center = c(lon = -4.456046, lat = 40.472408), zoom=6,maptype = "hybrid")
+ggmap(spain)
+```
+
