@@ -17,8 +17,10 @@ library(gridExtra)
 ### load and clean data 
 
 ```{r}
-madrid = read.csv("C:/Users/Brian Lambert/Desktop/Miami_Fall_2018/STA_483/madrid_2017.csv")
-stations = read.csv("C:/Users/Brian Lambert/Desktop/Miami_Fall_2018/STA_483/stations.csv")
+# madrid = read.csv("C:/Users/Brian Lambert/Desktop/Miami_Fall_2018/STA_483/madrid_2017.csv")
+madrid = read.csv("/Users/brianlambert/Desktop/STA_483/madrid_2017.csv")
+#stations = read.csv("C:/Users/Brian Lambert/Desktop/Miami_Fall_2018/STA_483/stations.csv")
+stations = read.csv("/Users/brianlambert/Desktop/STA_483/stations.csv")
 
 no2 = madrid[!is.na(madrid$NO_2),] # remove all rows with NO_2 = NA
 no2.pde = no2[no2$station == 28079004,] # keep only recordings from Pza. De Espana (station #28079004)
@@ -38,6 +40,7 @@ autoplot(pde.ts, scales = "%Y-%m") +
   ggtitle("NO2 Levels at the Pza. De Espana Recording Station") +
   theme_minimal()
 ```
+
 # 4
 
 ### Monthly mean CO levels by station table
@@ -176,11 +179,25 @@ colnames(means.no2.map)[1] = "id" # change variable name to match "stations" dat
 means.no2.map = means.no2.map %>%
   left_join(stations, by = "id")
 
+##########
+# retrieved from stackoverflow. I set up a Google Static Maps API and created a key but it would throw an error when retrieving.
+# The comment on the post said there's a issue with the currently published version and provided the following lines to fix ..
 if(!requireNamespace("devtools")) install.packages("devtools")
 devtools::install_github("dkahle/ggmap", ref = "tidyup")
 library(ggmap)
 register_google(key = "AIzaSyB5C3GHAmzoiwLbt8tSEyxmrx7OEnw0zwY") 
-spain<- get_googlemap(center = c(lon = -4.456046, lat = 40.472408), zoom=6,maptype = "hybrid")
-ggmap(spain)
+# citation:
+# D. Kahle and H. Wickham. ggmap: Spatial Visualization with ggplot2. The R Journal, 5(1), 144-161. URL
+#  http://journal.r-project.org/archive/2013-1/kahle-wickham.pdf
+##########
+
+spain<- get_googlemap(center = c(lon = -3.700279, lat = 40.396375), zoom=11,maptype = "roadmap", color = "bw") 
+# used google maps to find general latitude and longitude of Madrid
+
+ggmap(spain) +
+  ggtitle("Mean NO2 Levels by Station in Madrid") +
+  geom_point(data=means.no2.map, 
+             aes(x=lon, y=lat, size=2, colour = mean), alpha=I(0.7)) +
+  scale_colour_gradient(low = "red", high = "green")
 ```
 
