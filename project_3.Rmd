@@ -1,0 +1,299 @@
+---
+title: "STA 483 Project Part 3"
+author: "Brian Lambert"
+date: "12/2/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("/Users/brianlambert/Desktop/STA_483/project_pt2")
+library(tidyverse)
+library(lubridate)
+library(forecast)
+library(knitr)
+library(dplyr)
+library(doBy)
+library(gridExtra)
+library(WeightedPortTest)
+```
+
+# Part 1: Data Handling
+```{r}
+years = c("2001","2002","2003","2004","2005","2006","2007","2008","2009","2010","2011","2012","2013","2014","2015","2016","2017")
+data = data.frame(matrix(ncol = 4, nrow = 0))
+for (year in years) {
+  path = paste("madrid_01_17/madrid_", year, ".csv", sep="")
+  new_data = read.csv(path)
+  new_data = new_data[,c("date", "CO", "NO_2", "station")]
+  data = rbind(data, new_data)
+}
+
+data = data %>%
+  mutate(id = as.factor(station))
+
+stations = read.csv("stations.csv")
+stations = stations %>%
+  mutate(id = as.factor(id))
+
+data = left_join(data, stations, by = "id")
+data = data %>% 
+  drop_na(name)
+
+head(data)
+```
+
+
+# Part 2(a)
+```{r}
+ym_station_data = data %>%
+  mutate(Month = month(date)) %>%
+  mutate(Year = year(date)) %>% 
+  group_by(id, Year, Month) %>%
+  summarise_at(c("CO", "NO_2"), mean, na.rm = TRUE)
+
+head(ym_station_data)
+tail(ym_station_data)
+```
+
+# Part 2(b)
+```{r}
+stations_to_keep = c("28079004", "28079008", "28079016", "28079024", "28079036", "28079039")
+
+data_ym  = data %>%
+  filter(id %in% stations_to_keep) %>%
+  mutate(Month = month(date)) %>%
+  mutate(Year = year(date)) %>%
+  group_by(Year, Month) %>%
+  filter(Year != "2018") %>%
+  summarise_at(c("CO", "NO_2"), mean, na.rm = TRUE)
+```
+
+```{r}
+Year.Month.specific.ts <- ts(data_ym$CO, start=c(2001,1), freq=12)
+autoplot(Year.Month.specific.ts)
+```
+
+
+###Model building
++ sArima
+
+```{r}
+
+Year.Month.specific.ts <- ts(Year.Month.specific$Year.Month.specific, start=c(2001,1), freq=12)
+autoplot(Year.Month.specific.ts)
+## definite trend here; not stationary; dont really see anything with increasing/decreasing variance
+
+autoplot(log(Year.Month.specific.ts))
+## this definitely fixes the stationarity
+```
+
+Thus, we will be working with the log of the time series. Now to determine what model to fit. 
+
+```{r}
+
+grid.arrange(ggAcf(log(Year.Month.specific.ts), lag=36),
+             ggPacf(log(Year.Month.specific.ts), lag=36),
+             nrow=1)
+
+```
+
+
+Definitely some sARIMA process here. On the ACF there is significance at lag 12, 24, 36 etc. PACF seems to either cut at 2 or decay. Thus, seasonal component of AR(2) or an ARMA(1,2) or an
+
+```{r}
+
+seasonal.mod1 <- Arima(Year.Month.specific.ts, seasonal=c(1,0,2), lambda=0)
+seasonal.mod2 <- Arima(Year.Month.specific.ts, seasonal=c(2,0,2), lambda = 0)
+seasonal.mod1
+seasonal.mod2
+## AIC and BIC suggest that the sesaonal component that will perform better will be an SARIMA (2,0,2)
+
+grid.arrange(ggAcf(seasonal.mod2$residuals),
+             ggPacf(seasonal.mod2$residuals),
+             nrow=1)
+
+```
+
+Fixes most of the issues. ACF could decay or cut, definite PACF cut. ACF would cut at 2, PACF at 1 MA(1)? ARMA (1,1)? AR(2) Let's model
+
+
+```{r}
+
+Arima(Year.Month.specific.ts, order=c(1,0,1), seasonal=c(2,0,2), lambda=0)
+Arima(Year.Month.specific.ts, order=c(0,0,1), seasonal=c(2,0,2), lambda=0) 
+Arima(Year.Month.specific.ts, order=c(2,0,0), seasonal=c(2,0,2), lambda=0) 
+
+Weighted.Box.test(Arima(Year.Month.specific.ts, order=c(0,1,1), seasonal=c(1,1,1))$residuals, type = "Ljung")
+
+auto.arima(Year.Month.specific.ts)
+
+# auto.arima: ARIMA(1,1,1)(2,1,1)[12]
+# auto.arima (stepwise=F, approximation=F): ARIMA(0,1,1)(1,1,1)[12]
+
+```
+
+Going to keep both the sARIMA(2,0,0)(2,0,2) as well as the sARIMA(1,0,1)(2,0,2) to look at their residuals
+
+```{r}
+
+sarima.specific1 <- Arima(Year.Month.specific.ts, order=c(1,0,1), seasonal=c(2,0,2), lambda=0)
+grid.arrange(ggAcf(sarima.specific1$residuals),
+             ggPacf(sarima.specific1$residuals),
+             nrow=1)
+
+#sarima.specific2 <- Arima(Year.Month.specific.ts, order=c(2,0,1), seasonal=c(1,1,1))
+sarima.specific2 <- Arima(Year.Month.specific.ts, order=c(2,0,0), seasonal=c(2,0,2))
+grid.arrange(ggAcf(sarima.specific2$residuals),
+             ggPacf(sarima.specific2$residuals),
+             nrow=1)
+```
+
+only the sARIMA(2,0,0)(2,0,2) seems to have reasonably white noise residuals. Thus, I will keep it for the final validation study.
+
++ Deterministic & holt-winters
+```{r}
+
+specific.station.train <- window(Year.Month.specific.ts, start=c(2001,1), end=c(2016,12))
+specific.station.test <- window(Year.Month.specific.ts, start=c(2017,1), end=c(2017,4))
+
+hw.specific.station.fit <- HoltWinters(specific.station.train, seasonal="multiplicative") 
+
+SIN <- COS <- matrix(nrow=length(specific.station.train), ncol=2)
+for(i in 1:2) {
+  SIN[,i] <- sin(2*pi*i*time(specific.station.train))
+  COS[,i] <- cos(2*pi*i*time(specific.station.train))
+}
+
+# sarima.specific.station.fit <- Arima(specific.station.train, order=c(2,0,1), seasonal=c(1,1,1)) # 0.024, 0.023
+sarima.specific.station.fit <- Arima(specific.station.train, order=c(2,0,0), seasonal=c(2,0,2), lambda=0)
+
+deterministic.specific.fit <- Arima(specific.station.train, order=c(2,0,0), xreg=cbind(SIN,COS))
+
+hw.specific.station.pred <- forecast(hw.specific.station.fit, h=length(specific.station.test))
+
+sarima.specific.station.pred <- forecast(sarima.specific.station.fit, h=length(specific.station.test))
+
+SIN <- COS <- matrix(nrow=length(specific.station.test), ncol=2)
+for(i in 1:2) {
+  SIN[,i] <- sin(2*pi*i*time(specific.station.test))
+  COS[,i] <- cos(2*pi*i*time(specific.station.test))
+}
+
+deterministic.specific.pred <- forecast(deterministic.specific.fit, h=length(specific.station.test), xreg=cbind(SIN,COS))
+
+accuracy(hw.specific.station.pred, specific.station.test)[2,2:3]
+accuracy(deterministic.specific.pred, specific.station.test)[2,2:3]
+accuracy(sarima.specific.station.pred, specific.station.test)[2,2:3]
+```
+
+Off the bat, it looks like the sARIMA and the Holt Winters will predict the best. For the cross validation, we are going to make our training set begin at 2008 because there appears to be a mean shift. The data seems to behave differently over the last 10 years of recording than the first 7 years.
+
+
+```{r}
+ts.cv.study <- function(time.pt=2017+(1/12)) {
+  
+  # gets index of specific time pt passed to function
+  time.spot <- which(abs(time(Year.Month.specific.ts)-time.pt)<0.001)
+
+  unemp.test <- window(Year.Month.specific.ts, start=time(Year.Month.specific.ts)[time.spot+1], end=time(Year.Month.specific.ts)[time.spot+5])
+  unemp.train <- window(Year.Month.specific.ts, start = 2008+(1/12), end=time.pt)
+  
+  SIN <- COS <- matrix(nrow=length(unemp.train), ncol=2)
+for(i in 1:2) {
+  SIN[,i] <- sin(2*pi*i*time(unemp.train))
+  COS[,i] <- cos(2*pi*i*time(unemp.train))
+}
+  
+  deterministic.fit <- Arima(unemp.train, order=c(2,0,0), xreg=cbind(SIN,COS), method = "CSS")
+  hw.fit <- HoltWinters(unemp.train, seasonal = "multiplicative", beta = FALSE)
+  arima.fit <- Arima(unemp.train, order=c(2,0,0), seasonal=c(2,0,2), lambda = 0, method = "CSS")
+  
+  deterministic.pred <- forecast(deterministic.fit, h=length(unemp.test))
+  hw.pred <- forecast(hw.fit, h=length(unemp.test))
+  arima.pred <- forecast(arima.fit, h=length(unemp.test))
+
+ c(accuracy(deterministic.pred, unemp.test)[2,3],
+    accuracy(hw.pred, unemp.test)[2,3],
+    accuracy(arima.pred, unemp.test)[2,3],
+    accuracy(deterministic.pred, unemp.test)[2,2],
+    accuracy(hw.pred, unemp.test)[2,2],
+    accuracy(arima.pred, unemp.test)[2,2]) 
+}
+```
+
+```{r}
+my.dates <- time(window(Year.Month.specific.ts, start=c(2015,1), end=c(2017, 8)))
+cv.output <- sapply(as.vector(my.dates), FUN=ts.cv.study)
+```
+
+```{r}
+mae.tab <- t(cv.output[1:3,])   # Flip rows and columns
+rmse.tab <- t(cv.output[4:6,])
+colnames(mae.tab) <- colnames(rmse.tab) <- c("Deterministic", "HW, no trend", "ARIMA(2,0,0)(2,0,2)")
+```
+
+```{r}
+mae.summary <- cbind(apply(mae.tab, 2, mean), apply(mae.tab, 2, sd), apply(mae.tab, 2, median) )
+rmse.summary <- cbind(apply(rmse.tab, 2, mean), apply(rmse.tab, 2, sd), apply(rmse.tab, 2, median) )
+colnames(mae.summary) <- colnames(rmse.summary) <- c("Mean", "SD", "Median")
+kable(mae.summary)
+kable(rmse.summary)
+```
+
+```{r}
+final.fit1 = Arima(Year.Month.specific.ts, order=c(2,0,1), seasonal = c(1,1,1))
+final.fit2 = Arima(Year.Month.specific.ts, order=c(1,1,1), seasonal = c(2,1,1))
+final.fit3 = Arima(Year.Month.specific.ts, order=c(0,1,1), seasonal = c(1,1,1))
+final.pred1 <- forecast(final.fit1, h=5)
+final.pred2 <- forecast(final.fit2, h=5)
+final.pred3 <- forecast(final.fit3, h=5)
+
+autoplot(window(Year.Month.specific.ts, start=c(2015,1)) ) +
+  autolayer(final.pred1, PI=FALSE, series="ARIMA(2,0,1)(1,1,1)") +
+  autolayer(final.pred2, PI=FALSE, series="ARIMA(1,1,1)(2,1,1)") +
+  autolayer(final.pred3, PI=FALSE, series="ARIMA(0,1,1)(1,1,1)") 
+```
+
+
+# Problem 2
+
+```{r}
+stations_to_keep2 = c("28079004","28079036","28079038","28079039","28079040","28079008",
+                      "28079011","28079016","28079017","28079018","28079024","28079027","28079035")
+
+data_hourly = data %>%
+  filter(id %in% stations_to_keep2) %>%
+  mutate(Year = year(date),
+         Month= month(date),
+         Day = day(date),
+         Hour = hour(date)) %>%
+  group_by(Year, Month, Day, Hour) %>%
+  filter(Month %in% c(11,12,1)) %>%
+  summarise_at(c("NO_2"), mean, na.rm = TRUE)
+```
+
+```{r}
+hourly.ts = ts(data_hourly$NO_2, start = c(2001,1,1,0), frequency = 2208)
+autoplot(hourly.ts)
+autoplot(window(hourly.ts, end=c(2002)))
+```
+
+We used frequency = 2208 becuase we excluded all months except November, December, and January and there are 2208 total hours in those three months. Moreover, this function looks stationary, however seasonal.
+
+
+```{r}
+
+grid.arrange(ggAcf(hourly.ts, lag=48),
+             ggPacf(hourly.ts, lag=48),
+             nrow=1)
+
+hourly.ts.model <- Arima(hourly.ts, seasonal=c(2,0,1))
+
+grid.arrange(ggAcf(hourly.ts.model$residuals, lag=48),
+             ggPacf(hourly.ts.model$residuals, lag=48),
+             nrow=1)
+
+```
+
+
