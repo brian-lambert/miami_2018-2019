@@ -16,9 +16,9 @@ library(dplyr)
 library(doBy)
 library(gridExtra)
 library(WeightedPortTest)
+library(dummies)
 ```
 
-# Part 1: Data Handling
 ```{r}
 years = c("2001","2002","2003","2004","2005","2006","2007","2008","2009","2010","2011","2012","2013","2014","2015","2016","2017")
 data = data.frame(matrix(ncol = 4, nrow = 0))
@@ -44,7 +44,6 @@ head(data)
 ```
 
 
-# Part 2(a)
 ```{r}
 ym_station_data = data %>%
   mutate(Month = month(date)) %>%
@@ -56,7 +55,7 @@ head(ym_station_data)
 tail(ym_station_data)
 ```
 
-# Part 2(b)
+
 ```{r}
 stations_to_keep = c("28079004", "28079008", "28079016", "28079024", "28079036", "28079039")
 
@@ -69,18 +68,12 @@ data_ym  = data %>%
   summarise_at(c("CO", "NO_2"), mean, na.rm = TRUE)
 ```
 
-```{r}
-Year.Month.specific.ts <- ts(data_ym$CO, start=c(2001,1), freq=12)
-autoplot(Year.Month.specific.ts)
-```
-
-
-###Model building
+### Model building
 + sArima
 
 ```{r}
+Year.Month.specific.ts <- ts(data_ym$CO, start=c(2001,1), freq=12)
 
-Year.Month.specific.ts <- ts(Year.Month.specific$Year.Month.specific, start=c(2001,1), freq=12)
 autoplot(Year.Month.specific.ts)
 ## definite trend here; not stationary; dont really see anything with increasing/decreasing variance
 
@@ -151,65 +144,36 @@ grid.arrange(ggAcf(sarima.specific2$residuals),
 
 only the sARIMA(2,0,0)(2,0,2) seems to have reasonably white noise residuals. Thus, I will keep it for the final validation study.
 
-+ Deterministic & holt-winters
+
+# CV
 ```{r}
-
-specific.station.train <- window(Year.Month.specific.ts, start=c(2001,1), end=c(2016,12))
-specific.station.test <- window(Year.Month.specific.ts, start=c(2017,1), end=c(2017,4))
-
-hw.specific.station.fit <- HoltWinters(specific.station.train, seasonal="multiplicative") 
-
-SIN <- COS <- matrix(nrow=length(specific.station.train), ncol=2)
-for(i in 1:2) {
-  SIN[,i] <- sin(2*pi*i*time(specific.station.train))
-  COS[,i] <- cos(2*pi*i*time(specific.station.train))
-}
-
-# sarima.specific.station.fit <- Arima(specific.station.train, order=c(2,0,1), seasonal=c(1,1,1)) # 0.024, 0.023
-sarima.specific.station.fit <- Arima(specific.station.train, order=c(2,0,0), seasonal=c(2,0,2), lambda=0)
-
-deterministic.specific.fit <- Arima(specific.station.train, order=c(2,0,0), xreg=cbind(SIN,COS))
-
-hw.specific.station.pred <- forecast(hw.specific.station.fit, h=length(specific.station.test))
-
-sarima.specific.station.pred <- forecast(sarima.specific.station.fit, h=length(specific.station.test))
-
-SIN <- COS <- matrix(nrow=length(specific.station.test), ncol=2)
-for(i in 1:2) {
-  SIN[,i] <- sin(2*pi*i*time(specific.station.test))
-  COS[,i] <- cos(2*pi*i*time(specific.station.test))
-}
-
-deterministic.specific.pred <- forecast(deterministic.specific.fit, h=length(specific.station.test), xreg=cbind(SIN,COS))
-
-accuracy(hw.specific.station.pred, specific.station.test)[2,2:3]
-accuracy(deterministic.specific.pred, specific.station.test)[2,2:3]
-accuracy(sarima.specific.station.pred, specific.station.test)[2,2:3]
-```
-
-Off the bat, it looks like the sARIMA and the Holt Winters will predict the best. For the cross validation, we are going to make our training set begin at 2008 because there appears to be a mean shift. The data seems to behave differently over the last 10 years of recording than the first 7 years.
-
-
-```{r}
-ts.cv.study <- function(time.pt=2017+(1/12)) {
+ts.cv.study <- function(time.pt) {
   
   # gets index of specific time pt passed to function
   time.spot <- which(abs(time(Year.Month.specific.ts)-time.pt)<0.001)
 
   unemp.test <- window(Year.Month.specific.ts, start=time(Year.Month.specific.ts)[time.spot+1], end=time(Year.Month.specific.ts)[time.spot+5])
-  unemp.train <- window(Year.Month.specific.ts, start = 2008+(1/12), end=time.pt)
+  unemp.train <- window(Year.Month.specific.ts, start = c(2008,1), end=time.pt)
   
   SIN <- COS <- matrix(nrow=length(unemp.train), ncol=2)
-for(i in 1:2) {
-  SIN[,i] <- sin(2*pi*i*time(unemp.train))
-  COS[,i] <- cos(2*pi*i*time(unemp.train))
-}
+  for(i in 1:2) {
+    SIN[,i] <- sin(2*pi*i*time(unemp.train))
+    COS[,i] <- cos(2*pi*i*time(unemp.train))
+  }
   
   deterministic.fit <- Arima(unemp.train, order=c(2,0,0), xreg=cbind(SIN,COS), method = "CSS")
   hw.fit <- HoltWinters(unemp.train, seasonal = "multiplicative", beta = FALSE)
   arima.fit <- Arima(unemp.train, order=c(2,0,0), seasonal=c(2,0,2), lambda = 0, method = "CSS")
   
-  deterministic.pred <- forecast(deterministic.fit, h=length(unemp.test))
+  fake.data <- ts(rep(NA, 48), start=c(2018,1), freq=12)
+  SIN.fut <- cos.fut <- matrix(nrow=length(fake.data), ncol=2) 
+  COS.fut <- cos.fut <- matrix(nrow=length(fake.data), ncol=2) 
+  for(i in 1:2) {
+    SIN.fut[,i] <- sin(2*pi*i*time(fake.data))
+    COS.fut[,i] <- cos(2*pi*i*time(fake.data))
+  }
+
+  deterministic.pred <- forecast(deterministic.fit, xreg=cbind(SIN.fut, COS.fut), h=length(unemp.test))
   hw.pred <- forecast(hw.fit, h=length(unemp.test))
   arima.pred <- forecast(arima.fit, h=length(unemp.test))
 
@@ -223,7 +187,10 @@ for(i in 1:2) {
 ```
 
 ```{r}
-my.dates <- time(window(Year.Month.specific.ts, start=c(2015,1), end=c(2017, 8)))
+januarys = c(2013,2014,2015,2016,2017)
+cv.output <- sapply(januarys, FUN=ts.cv.study)
+
+my.dates <- time(window(Year.Month.specific.ts, start=c(2012,3), end=c(2017, 7)))
 cv.output <- sapply(as.vector(my.dates), FUN=ts.cv.study)
 ```
 
@@ -231,12 +198,11 @@ cv.output <- sapply(as.vector(my.dates), FUN=ts.cv.study)
 mae.tab <- t(cv.output[1:3,])   # Flip rows and columns
 rmse.tab <- t(cv.output[4:6,])
 colnames(mae.tab) <- colnames(rmse.tab) <- c("Deterministic", "HW, no trend", "ARIMA(2,0,0)(2,0,2)")
-```
 
-```{r}
 mae.summary <- cbind(apply(mae.tab, 2, mean), apply(mae.tab, 2, sd), apply(mae.tab, 2, median) )
 rmse.summary <- cbind(apply(rmse.tab, 2, mean), apply(rmse.tab, 2, sd), apply(rmse.tab, 2, median) )
 colnames(mae.summary) <- colnames(rmse.summary) <- c("Mean", "SD", "Median")
+
 kable(mae.summary)
 kable(rmse.summary)
 ```
@@ -267,19 +233,142 @@ data_hourly = data %>%
   mutate(Year = year(date),
          Month= month(date),
          Day = day(date),
-         Hour = hour(date)) %>%
-  group_by(Year, Month, Day, Hour) %>%
-  filter(Month %in% c(11,12,1)) %>%
+         Hour = hour(date),
+         Weekday = wday(date)) %>%
+  group_by(Year, Month, Day, Hour, Weekday) %>%
   summarise_at(c("NO_2"), mean, na.rm = TRUE)
 ```
 
+## half of data
 ```{r}
-hourly.ts = ts(data_hourly$NO_2, start = c(2001,1,1,0), frequency = 2208)
-autoplot(hourly.ts)
-autoplot(window(hourly.ts, end=c(2002)))
+hourly.half = data_hourly %>%
+  filter(Month %in% c(1,12) & Year > 2016)
 ```
 
-We used frequency = 2208 becuase we excluded all months except November, December, and January and there are 2208 total hours in those three months. Moreover, this function looks stationary, however seasonal.
+## just Saturday data
+```{r}
+hourly.sat = data_hourly %>%
+  filter(Weekday == 7)
+
+hourly.sat.ts = ts(hourly.sat$NO_2, start=c(2009,1,1,0), freq=24)
+autoplot(hourly.sat.ts)
+
+grid.arrange(ggAcf(hourly.ts, lag=48),
+             ggPacf(hourly.ts, lag=48),
+             nrow=1)
+
+hourly.sat.model1 <- Arima(hourly.sat.ts, seasonal=c(1,0,0), method="CSS")
+hourly.sat.model2 <- Arima(hourly.sat.ts, seasonal=c(2,0,0), method="CSS")
+hourly.sat.model3 <- Arima(hourly.sat.ts, seasonal=c(2,1,1), method="CSS")
+hourly.sat.model1
+hourly.sat.model2
+hourly.sat.model3
+
+##thus we will use seasonal component (2,0,1) because it has the highest log likelihood
+
+grid.arrange(ggAcf(hourly.sat.model2$residuals, lag=48),
+             ggPacf(hourly.sat.model2$residuals, lag=48),
+             nrow=1)
+
+##ACF decay at 24, PACF decay or cut. AR(1), AR(2) ARMA(1,1), ARMA(2,1), MA(1)
+
+hourly.sat.model.full1 <- Arima(hourly.sat.ts, seasonal=c(2,0,1), order=c(1,0,0), method="CSS")
+hourly.sat.model.full2 <- Arima(hourly.sat.ts, seasonal=c(2,0,1), order=c(2,0,0), method="CSS")
+hourly.sat.model.full3 <- Arima(hourly.sat.ts, seasonal=c(2,0,1), order=c(1,0,2), method="CSS")
+hourly.sat.model.full4 <- Arima(hourly.sat.ts, seasonal=c(2,0,2), order=c(2,0,3), method="CSS")
+hourly.sat.model.full5 <- Arima(hourly.sat.ts, seasonal=c(2,0,1), order=c(0,0,1), method="CSS")
+
+auto.arima(hourly.sat.ts)
+
+hourly.sat.model.full6 <-Arima(hourly.sat.ts, seasonal=c(2,1,2), order=c(0,0,2), method="CSS")
+
+grid.arrange(ggAcf(hourly.sat.model.full6$residuals, lag=48),
+             ggPacf(hourly.sat.model.full6$residuals, lag=48),
+             nrow=1)
+
+```
+
+## The last saturday
+```{r}
+head(hourly.sat)
+ 
+hour.no2 = hourly.sat[c("Hour","NO_2")]
+hour.no2 = hour.no2[c(25:nrow(hour.no2)), ]
+
+previous.hours = spread(hourly.sat, "Hour", "NO_2")[c("0","1","2","3","4","5","6","7",
+                                                      "8","9","10","11","12","13","14","15",
+                                                      "16","17","18","19","20","21","22","23")]
+
+full.repeated = NULL
+for (i in 2:887) {
+  
+  temp.repeated = NULL
+  previous.day = previous.hours[i-1,]
+    
+  for (j in 1:24) {
+    temp.repeated = rbind(temp.repeated, previous.day)
+  }
+  
+  full.repeated = rbind(full.repeated, temp.repeated)
+}
+
+final.data = as.data.frame(cbind(full.repeated, hour.no2))  
+
+final.data = dummy.data.frame(final.data,names=c("Hour"),sep="_")
+
+fit1 = lm(NO_2 ~ ., data = final.data)
+summary(fit1)
+```
+
+
+
+```{r}
+for (i in 0:23) {
+  new.data = c(48.076923,37.307692,30.230769,23.153846,18.692308,15.153846,
+            14.076923,14.230769,20.000000,22.230769,25.769231,27.230769,
+            27.461538,25.461538,23.076923,20.307692,18.769231,21.076923,
+            30.153846,47.461538,67.692308,78.153846,82.307692,83.461538)
+  
+  new.dummies = c(rep(0,24))
+  new.dummies[i+1] = 1
+  
+  new.data = append(new.data, new.dummies)
+
+  new.df = as.data.frame(t(as.data.frame(new.data)))
+  colnames(new.df) = c("0","1","2","3","4","5","6","7","8","9","10","11","12","13","14","15",
+                     "16","17","18","19","20","21","22","23","Hour_0","Hour_1","Hour_2","Hour_3"
+                     ,"Hour_4","Hour_5","Hour_6","Hour_7","Hour_8","Hour_9","Hour_10","Hour_11"
+                     ,"Hour_12","Hour_13","Hour_14","Hour_15","Hour_16","Hour_17","Hour_18","Hour_19"
+                     ,"Hour_20","Hour_21","Hour_22","Hour_23")
+
+  print(i)
+  print(suppressWarnings(predict(fit1, new.df)))
+}
+
+```
+
+```{r}
+library(DAAG)
+cv.lm(data = final.data, fit1, m=5, plotit=TRUE, printit=TRUE)
+```
+
+## Average of last 4 Saturdays
+```{r}
+sat.avgs = hourly.sat[c((nrow(hourly.sat)-(24*4)+1):nrow(hourly.sat)), c("Hour","NO_2")]
+sat.avgs =  sat.avgs %>%
+  group_by(Hour) %>%
+  summarise(no2.mean = mean(NO_2))
+```
+
+#########################################
+
+```{r}
+hourly.ts = ts(hourly.half$NO_2, start = c(2017,1,1,0), frequency = 1488)
+autoplot(hourly.ts)
+
+```
+
+We used frequency = 1408 becuase we excluded all months except November, December, and January and there are 2208 total hours in those three months. Moreover, this function looks stationary, however seasonal.
 
 
 ```{r}
@@ -288,7 +377,9 @@ grid.arrange(ggAcf(hourly.ts, lag=48),
              ggPacf(hourly.ts, lag=48),
              nrow=1)
 
-hourly.ts.model <- Arima(hourly.ts, seasonal=c(2,0,1))
+hourly.ts.model <- Arima(hourly.ts, order=c(2,0,1), method = "CSS")
+
+hourly.ts.model.full <- Arima(hourly.ts, seasonal=c(1,0,0), order=c(1,0,1), method="CSS")
 
 grid.arrange(ggAcf(hourly.ts.model$residuals, lag=48),
              ggPacf(hourly.ts.model$residuals, lag=48),
